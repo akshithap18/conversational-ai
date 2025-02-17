@@ -3,6 +3,7 @@ from datetime import datetime
 from flask import Flask, render_template, request, redirect, url_for, send_file, send_from_directory
 from google.cloud import texttospeech_v1
 from google.cloud import speech
+from google.cloud import language_v1
 import threading
 
 import os
@@ -15,12 +16,12 @@ TTS_FOLDER = 'tts'
 ALLOWED_EXTENSIONS = {'wav'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['TTS_FOLDER'] = TTS_FOLDER
-client_options = {"api_key": "AIzaSyBphC526Gbx2P1nOoQerguLuY-VNLq_lqM"}
 
 
-client_texttospeech=texttospeech_v1.TextToSpeechClient(client_options=client_options)
 
-client_speechtotext=speech.SpeechClient(client_options=client_options)
+client_texttospeech=texttospeech_v1.TextToSpeechClient()
+client_speechtotext=speech.SpeechClient()
+client_sentiment = language_v1.LanguageServiceClient()
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(TTS_FOLDER, exist_ok=True)
@@ -43,6 +44,13 @@ def text_to_speech(text):
     response = client_texttospeech.synthesize_speech(request=request)
     return response.audio_content
 
+def text_sentiment_score(text):
+   document = language_v1.Document(content=text, type=language_v1.Document.Type.PLAIN_TEXT)
+   sentiment = client_sentiment.analyze_sentiment(document=document)
+   score = round(sentiment.document_sentiment.score, 2)
+   label = "Positive" if score > 0 else "Negative" if score < 0 else "Neutral"
+   return score, label
+
 def process_text_and_save_files(text,file_path):
     # Process the text and generate the files in a background thread
     wav = text_to_speech(text)
@@ -56,10 +64,17 @@ def process_audio_and_save_files(file_path):
         data = f.read()
 
     text = speech_to_text(data)
+    score, label  =text_sentiment_score(text)
 
     txt_file_path = file_path + ".txt"
     with open(txt_file_path, "w") as text_file:
         text_file.write(text)
+
+    sentiment = "label" + ":" + "score" + "\n" + label + ":" + str(score)   
+
+    sentiment_file_path = file_path +"-sentiment" + ".txt"
+    with open(sentiment_file_path, "w") as sentiment_file:
+        sentiment_file.write(sentiment)
 
 def allowed_file(filename):
     return '.' in filename and \
@@ -107,11 +122,20 @@ def get_file(filename):
 def upload_text():
     text = request.form['text']
 
+    score, label  =text_sentiment_score(text)
+
     filename = datetime.now().strftime("%Y%m%d-%I%M%S%p") + '.wav'
     file_path = os.path.join(app.config['TTS_FOLDER'], filename)
 
     with open(file_path + ".txt" , "w") as file:
         file.write(text)
+
+    sentiment = "label" + ":" + "score" + "\n" + label + ":" + str(score)    
+
+    sentiment_file_path = file_path +"-sentiment" + ".txt"
+    with open(sentiment_file_path, "w") as sentiment_file:
+        sentiment_file.write(sentiment)
+
 
     process_text_and_save_files(text,file_path)    
 
@@ -133,3 +157,4 @@ def tts_uploaded_file(filename):
 
 if __name__ == '__main__':
     app.run(debug=True)
+
