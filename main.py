@@ -20,7 +20,6 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 project_id = os.environ.get('project_id')
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(TTS_FOLDER, exist_ok=True)
 
 prompt = """
 Please provide an exact trascript for the audio, followed by sentiment analysis.
