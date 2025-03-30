@@ -1,10 +1,12 @@
 from datetime import datetime
 
 from flask import Flask, render_template, request, redirect, url_for, send_file, send_from_directory
-from google.cloud import texttospeech_v1
-from google.cloud import speech
-from google.cloud import language_v1
 import threading
+import os
+import vertexai
+import base64
+from vertexai.generative_models import GenerativeModel, Part
+import json
 
 import os
 
@@ -12,69 +14,44 @@ app = Flask(__name__)
 
 # Configure upload folder
 UPLOAD_FOLDER = 'uploads'
-TTS_FOLDER = 'tts'
 ALLOWED_EXTENSIONS = {'wav'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['TTS_FOLDER'] = TTS_FOLDER
 
-
-
-client_texttospeech=texttospeech_v1.TextToSpeechClient()
-client_speechtotext=speech.SpeechClient()
-client_sentiment = language_v1.LanguageServiceClient()
+project_id = os.environ.get('project_id')
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(TTS_FOLDER, exist_ok=True)
 
-def speech_to_text(content):
-  audio=speech.RecognitionAudio(content=content)
-  config=speech.RecognitionConfig(language_code="en-US",model="latest_long",audio_channel_count=1,enable_word_confidence=True,enable_word_time_offsets=True)
-  operation=client_speechtotext.long_running_recognize(config=config, audio=audio)
-  response=operation.result(timeout=90)
-  txt = ''
-  for result in response.results:
-    txt = txt + result.alternatives[0].transcript + '\n'
-  return txt
+prompt = """
+Please provide an exact trascript for the audio, followed by sentiment analysis.
 
-def text_to_speech(text):
-    input = texttospeech_v1.SynthesisInput(text = text)
-    voice = texttospeech_v1.VoiceSelectionParams(language_code = "en-UK",ssml_gender = "MALE")
-    audio_config = texttospeech_v1.AudioConfig(audio_encoding = "LINEAR16")
-    request = texttospeech_v1.SynthesizeSpeechRequest(input=input,voice=voice,audio_config=audio_config)
-    response = client_texttospeech.synthesize_speech(request=request)
-    return response.audio_content
+Your response should follow the format (json):
 
-def text_sentiment_score(text):
-   document = language_v1.Document(content=text, type=language_v1.Document.Type.PLAIN_TEXT)
-   sentiment = client_sentiment.analyze_sentiment(document=document)
-   score = round(sentiment.document_sentiment.score, 2)
-   label = "Positive" if score > 0 else "Negative" if score < 0 else "Neutral"
-   return score, label
+Text: USERS SPEECH TRANSCRIPTION
 
-def process_text_and_save_files(text,file_path):
-    # Process the text and generate the files in a background thread
-    wav = text_to_speech(text)
+Sentiment Analysis: positive|neutral|negative
 
-    with open(file_path, 'wb') as f:
-        f.write(wav)
+Sentiment Score : -1 to 1
+"""
 
-def process_audio_and_save_files(file_path):
-    # Process the audio file and save the transcribed text in the background
-    with open(file_path, 'rb') as f:
-        data = f.read()
+vertexai.init(project=project_id, location="us-central1")
+model = GenerativeModel("gemini-1.5-flash-001")
 
-    text = speech_to_text(data)
-    score, label  =text_sentiment_score(text)
-
-    txt_file_path = file_path + ".txt"
-    with open(txt_file_path, "w") as text_file:
-        text_file.write(text)
-
-    sentiment = "label" + ":" + "score" + "\n" + label + ":" + str(score)   
-
-    sentiment_file_path = file_path +"-sentiment" + ".txt"
-    with open(sentiment_file_path, "w") as sentiment_file:
-        sentiment_file.write(sentiment)
+def audio_to_text(audio_file_path):
+    try:
+        with open(audio_file_path, "rb") as audio_file:
+            audio_data = audio_file.read()
+            audio_part = Part.from_data(data=audio_data, mime_type="audio/wav")
+            prompt_part = Part.from_text(prompt)
+            response = model.generate_content([audio_part, prompt_part])
+            clean_response = response.text.replace('```json', '').replace('```', '').strip()
+            txt_file_path = audio_file_path + ".txt"
+            with open(txt_file_path, "w") as text_file:
+                text_file.write(clean_response)
+            return None
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return None
 
 def allowed_file(filename):
     return '.' in filename and \
@@ -104,12 +81,12 @@ def upload_audio():
         flash('No selected file')
         return redirect(request.url)
     if file:
-        
+
         filename = datetime.now().strftime("%Y%m%d-%I%M%S%p") + '.wav'
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(file_path)
         # Start processing the audio file in a background thread
-        threading.Thread(target=process_audio_and_save_files, args=(file_path,)).start()
+        threading.Thread(target=audio_to_text, args=(file_path,)).start()
 
     return redirect('/') #success
 
@@ -117,31 +94,6 @@ def upload_audio():
 def get_file(filename):
     return send_file(filename)
 
-    
-@app.route('/upload_text', methods=['POST'])
-def upload_text():
-    text = request.form['text']
-
-    score, label  =text_sentiment_score(text)
-
-    filename = datetime.now().strftime("%Y%m%d-%I%M%S%p") + '.wav'
-    file_path = os.path.join(app.config['TTS_FOLDER'], filename)
-
-    with open(file_path + ".txt" , "w") as file:
-        file.write(text)
-
-    sentiment = "label" + ":" + "score" + "\n" + label + ":" + str(score)    
-
-    sentiment_file_path = file_path +"-sentiment" + ".txt"
-    with open(sentiment_file_path, "w") as sentiment_file:
-        sentiment_file.write(sentiment)
-
-
-    process_text_and_save_files(text,file_path)    
-
-    #threading.Thread(target=process_text_and_save_files, args=(text,file_path,)).start()
-
-    return redirect('/') #success
 
 @app.route('/script.js',methods=['GET'])
 def scripts_js():
@@ -150,10 +102,6 @@ def scripts_js():
 @app.route('/uploads/<filename>')
 def uploaded_file(filename):
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
-
-@app.route('/tts_uploads/<filename>')
-def tts_uploaded_file(filename):
-    return send_from_directory(app.config['TTS_FOLDER'], filename)
 
 if __name__ == '__main__':
     app.run(debug=True)

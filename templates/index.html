@@ -22,43 +22,16 @@
                 <h2>Recorded Files</h2>
                 <ul>
                     {% for file in files %}
-                    <li> 
+                    <li>
                         <audio controls>
                             <source src="{{ url_for('uploaded_file', filename=file) }}">
                             Your browser does not support the audio element.
                         </audio><br>
                         {{file}}
-                        <a href="uploads/{{file}}.txt" style="margin-right: 20px;">Transcription</a>
-                        <a href="uploads/{{file}}-sentiment.txt">Sentiment Analysis</a>
+                        <a href="uploads/{{file}}.txt" style="margin-right: 20px;">Transcription & Sentiment Analysis</a>
                     </li>
                     {% endfor %}
                 </ul>
-            </td>
-            <td style="width:50%">
-                <h2>Type in your text to generate audio</h2>
-
-                <form action="/upload_text" method="post">
-                  <textarea name="text" rows="10" cols="50"></textarea>
-                  <br>
-                  <input type="submit" value="Upload">
-                </form>
-
-                <h2>Generated Audio (TTS)</h2>
-                <ul>
-                    {% for tts_file in tts_files %}
-                    <li> 
-                        <audio controls>
-                            <source src="{{ url_for('tts_uploaded_file', filename=tts_file) }}">
-                            Your browser does not support the audio element.
-                        </audio><br>
-                        {{tts_file}} 
-                        <a href="tts_uploads/{{ tts_file }}.txt" style="margin-right: 20px;">Orginal</a>
-                        <a href="tts_uploads/{{tts_file}}-sentiment.txt">Sentiment Analysis</a>
-                    </li>
-                    {% endfor %}
-                </ul>
-
-                <!-- insert list of files here -->
             </td>
         </tr>
     </table>
