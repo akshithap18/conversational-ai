@@ -67,8 +67,7 @@ def get_files(dir_path):
 @app.route('/')
 def index():
     files = get_files(UPLOAD_FOLDER)
-    tts_files = get_files(TTS_FOLDER)
-    return render_template('index.html', files=files,tts_files=tts_files)
+    return render_template('index.html', files=files)
 
 @app.route('/upload', methods=['POST'])
 def upload_audio():
